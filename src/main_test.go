@@ -1,35 +1,46 @@
 package main
 
 import (
+	"bytes"
 	"testing"
 )
 
+func Benchmark_extractMeasurement(b *testing.B) {
+	data := []byte("Buenos Aires;22.5")
+	for i := 0; i < b.N; i++ {
+		extractMeasurement(data)
+	}
+}
+
 func Test_extractMeasurement(t *testing.T) {
 	tests := map[string]struct {
-		given string
-		expectedKey string
+		given         string
+		expectedKey   string
 		expectedValue float32
 	}{
 		"happy path": {
-			given: "Buenos Aires;22.5",
-			expectedKey: "Buenos Aires",
+			given:         "Buenos Aires;22.5",
+			expectedKey:   "Buenos Aires",
 			expectedValue: 22.5,
 		},
 		"key with special chars": {
-			given: "St. John's;15.2",
-			expectedKey: "St. John's",
+			given:         "St. John's;15.2",
+			expectedKey:   "St. John's",
 			expectedValue: 15.2,
 		},
 		"negative value": {
-			given: "Cracow;-1",
-			expectedKey: "Cracow",
+			given:         "Cracow;-1",
+			expectedKey:   "Cracow",
 			expectedValue: -1,
 		},
 	}
-	
+
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			city, measurement := extractMeasurement(test.given)
+			city, measurement, err := extractMeasurement([]byte(test.given))
+			if err != nil {
+				t.Fatalf("got err: %s", err)
+			}
 			if city != test.expectedKey {
 				t.Errorf("expected city to be %s, but got %s", test.expectedKey, city)
 			}
@@ -40,36 +51,68 @@ func Test_extractMeasurement(t *testing.T) {
 	}
 }
 
+func Benchmark_printMeasurement(b *testing.B) {
+	city := "Buenos Aires"
+	measurements := measurements{min: 22.5, max: 33.5, mean: 28.5}
+	var buf bytes.Buffer
+	for i := 0; i < b.N; i++ {
+		printMeasurement(city, measurements, &buf)
+	}
+}
+
 func Test_printMeasurement(t *testing.T) {
 	tests := map[string]struct {
-		givenCity string
+		givenCity        string
 		givenMeasurement measurements
-		expected string
+		expected         string
 	}{
 		"simple test": {
 			givenCity: "Buenos Aires",
 			givenMeasurement: measurements{
-				min: 22.5,
-				max: 33.5,
+				min:  22.5,
+				max:  33.5,
 				mean: 28.5,
 			},
-			expected: "Buenos Aires;22.5;28.5;33.5",
+			expected: "Buenos Aires;22.5;28.5;33.5\n",
 		},
 	}
-	
+
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			result := printMeasurement(test.givenCity, test.givenMeasurement)
-			if result != test.expected {
-				t.Errorf("expected result to be %s, but got %s", test.expected, result)
+			var buf bytes.Buffer
+			err := printMeasurement(test.givenCity, test.givenMeasurement, &buf)
+			if err != nil {
+				t.Fatalf("got err: %s", err)
+			}
+
+			res := buf.String()
+			if res != test.expected {
+				t.Errorf("expected result to be %s, but got %s", test.expected, res)
 			}
 		})
 	}
 }
 
-func Test_process(t *testing.T){
+func Benchmark_process(b *testing.B) {
+	in := []input{
+		{"Buenos Aires", 22.5},
+		{"St. John's", 15.2},
+		{"Cracow", -1},
+		{"Buenos Aires", 14.5},
+		{"St. John's", 11.2},
+		{"Cracow", 8.3},
+	}
+	for i := 0; i < b.N; i++ {
+		result := map[string]measurements{}
+		for _, in := range in {
+			process(in, result)
+		}
+	}
+}
+
+func Test_process(t *testing.T) {
 	tests := map[string]struct {
-		given []input
+		given    []input
 		expected map[string]measurements
 	}{
 		"simple processing": {
@@ -84,7 +127,7 @@ func Test_process(t *testing.T){
 		},
 		"slightly more complex": {
 			given: []input{
-				{"Buenos Aires", 22.5,},
+				{"Buenos Aires", 22.5},
 				{"St. John's", 15.2},
 				{"Cracow", -1},
 				{"Buenos Aires", 14.5},
@@ -93,8 +136,8 @@ func Test_process(t *testing.T){
 			},
 			expected: map[string]measurements{
 				"Buenos Aires": {min: 14.5, max: 22.5, mean: 18.5},
-				"St. John's": {min: 11.2, max: 15.2, mean: 13.2},
-				"Cracow": {min: -1, max: 8.3, mean: 3.65},
+				"St. John's":   {min: 11.2, max: 15.2, mean: 13.2},
+				"Cracow":       {min: -1, max: 8.3, mean: 3.65},
 			},
 		},
 	}

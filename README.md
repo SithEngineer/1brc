@@ -37,3 +37,12 @@ Now that we established a baseline in terms of code and time needed, lets begin 
 ### Baseline
 
 From the first execution, which took 156.67 seconds. A CPU profiling makes it is clear that reading a file line by line is **very** time consuming. More than 70% of the CPU is wasted in syscalls, from reading a file, line by line. Interestingly we have a similar issue with writing to the standard output.
+
+### Using buffers
+
+Knowing that each station name has a max of 100 bytes + `;` + reading (longest possible is `-99.9`) = 106 bytes for a maximum of each line. This means that we can do three things:
+1. Read a chunk of the file into a buffer
+2. Find the last new line to seek back in the file reading
+3. Read line by line using a smaller buffer
+
+...all this to reduce time to 149.62 seconds using a 1MB buffer... 
