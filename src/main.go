@@ -8,53 +8,39 @@ import (
 	"io"
 	"log"
 	"os"
-	"strconv"
-	"strings"
 )
 
-const newLine byte = 10
-const bufferSize int = 1 * 1024 * 1024
-
-type input struct {
-	city  string
-	value float32
+type measurement struct {
+	name []byte
+	min  int16
+	avg  int16
+	max  int16
 }
 
-type measurements struct {
-	min  float32
-	max  float32
-	mean float32
-}
+func printMeasurement(m measurement, w io.Writer) error {
+	minHigh := m.min / 10
+	minLow := m.min % 10
+	if minLow < 0 {
+		minLow = -minLow
+	}
 
-func extractMeasurement(line []byte) (string, float32, error) {
-	parts := strings.Split(string(line), ";")
-	f, err := strconv.ParseFloat(parts[1], 32)
+	avgHigh := m.avg / 10
+	avgLow := m.avg % 10
+	if avgLow < 0 {
+		avgLow = -avgLow
+	}
+
+	maxHigh := m.max / 10
+	maxLow := m.max % 10
+	if maxLow < 0 {
+		maxLow = -maxLow
+	}
+
+	_, err := fmt.Fprintf(w, "%s;%d.%d;%d.%d;%d.%d\n", m.name, minHigh, minLow, avgHigh, avgLow, maxHigh, maxLow)
 	if err != nil {
-		return "", 0.0, err
+		return err
 	}
-	return parts[0], float32(f), nil
-}
-
-func printMeasurement(city string, m measurements, w io.Writer) error {
-	_, err := fmt.Fprintf(w, "%s;%.1f;%.1f;%.1f\n", city, m.min, m.mean, m.max)
-	return err
-}
-
-func process(d input, res map[string]measurements) {
-	entry, ok := res[d.city]
-	if !ok {
-		entry = measurements{min: d.value, max: d.value, mean: d.value}
-	} else {
-		entry.mean += d.value
-		entry.mean /= 2
-		if d.value > entry.max {
-			entry.max = d.value
-		}
-		if d.value < entry.min {
-			entry.min = d.value
-		}
-	}
-	res[d.city] = entry
+	return nil
 }
 
 func lastIndexOf(b []byte, maxIdx int, delym byte) int {
@@ -94,7 +80,7 @@ func main() {
 	}
 	defer f.Close()
 
-	result := map[string]measurements{}
+	result := make(map[uint64]measurement, 10000)
 
 	buf := make([]byte, bufferSize)
 	for {
@@ -120,17 +106,21 @@ func main() {
 			lineStart, lineEnd := lineIdxs(bufLastReadIdx, buf, newLine)
 			bufLastReadIdx = lineEnd + 1
 
-			city, value, err := extractMeasurement(buf[lineStart:lineEnd])
-			if err != nil {
-				panic(fmt.Errorf("reading line: %w", err))
-			}
-			process(input{city: city, value: value}, result)
+			stHash, stTemp, stName := parseStationLine(buf[lineStart:lineEnd])
+			current := result[stHash]
+			current.name = stName
+			current.max = maxMeasurements(current.max, stTemp)
+			current.min = minMeasurements(current.min, stTemp)
+			current.avg = avgMeasurements(current.avg, stTemp)
+			result[stHash] = current
 		}
 	}
 
-	output := bufio.NewWriter(os.Stdout)
-	for k, v := range result {
-		printMeasurement(k, v, output)
+	output := bufio.NewWriterSize(os.Stdout, bufferSize)
+	for _, v := range result {
+		if len(v.name) > 0 {
+			printMeasurement(v, output)
+		}
 	}
 	err = output.Flush()
 	if err != nil {

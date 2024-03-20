@@ -45,4 +45,57 @@ Knowing that each station name has a max of 100 bytes + `;` + reading (longest p
 2. Find the last new line to seek back in the file reading
 3. Read line by line using a smaller buffer
 
-...all this to reduce time to 149.62 seconds using a 1MB buffer... 
+All this work to reduce time to 149.62 seconds using a 1MB buffer. Sad. Looking at the computation profile a lot of CPU time is invested in `extractMeasurement` and `process` functions, around 20% and 25% respectively, so this gives us two targets for the next iteration. There is one detail though: `process` seems to spend most of it's time - 20% - on a map access, let's see how we can change that.
+
+### Using smaller storage units for data
+
+`-99.9` can be decomposed in 13 bits:
+1. `-`  = 1 bit
+2. `99` = 7 bits
+3. `.`  = 1 bit
+4. `9`  = 4 bit
+
+Using an uint16 with big endian we get `-99.9` = 1001 1111 1001 1001
+Using an uint16 with little endian we get `-99.9` = 1001 1001 1111 1001
+
+13 bits is the maximum a single temperature measurement will use, so we can use two `byte`s or a single `uint16` but this also means (dangerous) bitwise operations.
+
+However if we use a number from 0 to 999, thus droping the decimal separator and keeping the signal bit:
+[signal][0..999] = 11 bits thus `-99.9` becomes 1 1111100111
+
+In go we would use a uint16 to store the 11 bits nevertheles, so we can take another shortcut for the signal.
+if 'uint16' stores values between '0 - 1024' then 'int16' stores values between '-512 - 511'. This means our avg, min and max operations will use int16 instead of float32, and to print the value we can just do 'number / 10' for the integer part and the floating point is positioned by 'number % 10'.
+
+Parsing a measurement is done by reading byte by byte and aggregating that to a result using the formula: existing result = (read byte - byte '0') + (existing result * 10). If the first byte is a '-' the result is a negative value, otherwise the result is a positive number.
+
+The average between two measurements consists in two operations:
+1. Adding the existing and new measurement
+2. Divide the previous result by 2
+
+Point 2. can be achieved by shifting bits to the right once.
+
+Cities are strings and a string in go is an imutable array of bytes. Let's keep them like this at least for now.
+
+At this point the time to process the whole file is around 63 seconds.
+
+### Challenges to solve
+
+#### Map access & assignment
+
+There was a margninal gain by using an hashed station name as a uint64 instead of a string for a map key. This forced to store the station name in the value entry, making the value bigger than necessary.
+
+#### `lineIdxs`
+
+Used to calculate the beginning and end of a line, in a buffer "page". Consumes ~22% of CPU cycles.
+
+#### `lineIdxs`
+
+Used to calculate the beginning and end of a line, in a buffer "page". Consumes ~22% of CPU cycles. 
+
+#### `parseStationLine` 
+
+After knowing the beginning and end of a line, this function is used to parse the line data. Consumers ~20% of CPU cycles.
+
+#### `mapaccess1_fast64` and `mapassign_fast64`
+
+~31% and ~7% respectively CPU cycles consumed. This can be mitigated by not using a map... Or not using go map.

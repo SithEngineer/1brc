@@ -1,12 +1,11 @@
 build:
-	@go build -o ../bin/measure main.go
+	@go build -o ../bin/measure .
 
 test:
 	@go test -v --race
 	
 bench:
-	# -run=^$ means run no unit test, just benchmarks
-	@go test -bench=./... -run=^$
+	@go test -bench=.
 
 run: build
 	@../bin/measure -input measurements.txt
@@ -23,7 +22,7 @@ measurements-billion:
 measurements-million:
 	@python3 create_measurements.py 1_000_000
 
-profile-CPU: run
+profile-cpu: run
 	@go tool pprof -http=:8080 cpu.pprof
 
 profile-mem: run
