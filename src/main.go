@@ -8,13 +8,21 @@ import (
 	"io"
 	"log"
 	"os"
+	"sync"
 )
 
+type stationLine struct {
+	hash        uint64
+	measurement int16
+	name        []byte
+}
+
 type measurement struct {
-	name []byte
-	min  int16
-	avg  int16
-	max  int16
+	name        []byte
+	min         int16
+	max         int16
+	sum         int32
+	nrSightings int16
 }
 
 func printMeasurement(m measurement, w io.Writer) error {
@@ -24,8 +32,9 @@ func printMeasurement(m measurement, w io.Writer) error {
 		minLow = -minLow
 	}
 
-	avgHigh := m.avg / 10
-	avgLow := m.avg % 10
+	avg := m.sum / int32(m.nrSightings)
+	avgHigh := avg / 10
+	avgLow := avg % 10
 	if avgLow < 0 {
 		avgLow = -avgLow
 	}
@@ -63,6 +72,77 @@ func lineIdxs(sourceStartIdx int, source []byte, delym byte) (int, int) {
 	return start, end
 }
 
+func readFile(inputFile *string, bufPageChan chan []byte) {
+	f, err := os.Open(*inputFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+	defer close(bufPageChan)
+
+	var buf = make([]byte, bufferSizeInBytes)
+
+	for {
+		bytesRead, err := f.Read(buf)
+		if bytesRead == 0 {
+			break
+		}
+		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+			panic(fmt.Errorf("reading to buffer: %w", err))
+		}
+
+		// go back to the last found new line, both in buffer as in the file
+		lastNewLineIdx := lastIndexOf(buf, bytesRead, byteNewLine)
+
+		_, err = f.Seek(int64(lastNewLineIdx-bytesRead+1), 1)
+		if err != nil {
+			panic(err)
+		}
+
+		// send "page" with multiple lines to line parser
+		bufPageCopy := make([]byte, lastNewLineIdx)
+		copy(bufPageCopy, buf[:lastNewLineIdx])
+		bufPageChan <- bufPageCopy
+	}
+}
+
+func parseLines(lineParseWg *sync.WaitGroup, bufPageChan chan []byte, lineChan chan stationLine) {
+	defer lineParseWg.Done()
+	for bufPage := range bufPageChan {
+		for bufLastReadIdx := 0; bufLastReadIdx < len(bufPage); {
+			lineStart, lineEnd := lineIdxs(bufLastReadIdx, bufPage, byteNewLine)
+			bufLastReadIdx = lineEnd + 1
+
+			stHash, stTemp, stName := parseStationLine(bufPage[lineStart:lineEnd])
+			lineChan <- stationLine{stHash, stTemp, stName}
+		}
+	}
+}
+
+func shardFunc(data []byte) uint8 {
+	sum := uint64(0)
+	for i := 0; i < 8 && i < len(data); i++ {
+		sum += uint64(data[i])
+	}
+
+	return uint8(sum % uint64(aggregatorWorkers))
+}
+
+func agregate(lineChan chan stationLine, wg *sync.WaitGroup, shardId uint8, result map[uint64]measurement) {
+	defer wg.Done()
+	for line := range lineChan {
+		if shardFunc(line.name) == shardId {
+			current := result[line.hash]
+			current.name = line.name
+			current.max = maxMeasurements(current.max, line.measurement)
+			current.min = minMeasurements(current.min, line.measurement)
+			current.sum += int32(line.measurement)
+			current.nrSightings += 1
+			result[line.hash] = current
+		}
+	}
+}
+
 func main() {
 	// defer profile.Start(profile.CPUProfile, profile.ProfilePath(".")).Stop() // for CPU
 	// defer profile.Start(profile.MemProfile, profile.ProfilePath(".")).Stop() // for memory
@@ -74,55 +154,41 @@ func main() {
 		log.Fatal("measurements file not provided")
 	}
 
-	f, err := os.Open(*inputFile)
-	if err != nil {
-		log.Fatal(err)
+	bufPageChan := make(chan []byte, 10)     // buffered channel for 100 buffer pages = 100 * bufferSize
+	lineChan := make(chan stationLine, 1000) // buffered channel for 1000 station lines
+
+	var aggregateWg sync.WaitGroup
+	aggregateWg.Add(aggregatorWorkers)
+	aggregatedRes := make([]map[uint64]measurement, aggregatorWorkers)
+	for i := 0; i < lineParserWorkers; i++ {
+		aggregatedRes[i] = make(map[uint64]measurement, nrStations/aggregatorWorkers)
+		go agregate(lineChan, &aggregateWg, uint8(i), aggregatedRes[i])
 	}
-	defer f.Close()
 
-	result := make(map[uint64]measurement, 10000)
+	var lineParseWg sync.WaitGroup
+	lineParseWg.Add(lineParserWorkers)
+	for i := 0; i < lineParserWorkers; i++ {
+		go parseLines(&lineParseWg, bufPageChan, lineChan)
+	}
 
-	buf := make([]byte, bufferSize)
-	for {
-		bytesRead, err := f.Read(buf)
-		if bytesRead == 0 {
-			break
-		}
-		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-			panic(fmt.Errorf("reading to buffer: %w", err))
-		}
+	go readFile(inputFile, bufPageChan)
 
-		// go back to the last found new line, both in buffer as in the file
-		lastNewLineIdx := lastIndexOf(buf, bytesRead, newLine)
+	lineParseWg.Wait()
+	close(lineChan)
 
-		if bytesRead == bufferSize {
-			_, err := f.Seek(int64(lastNewLineIdx-bytesRead+1), 1)
-			if err != nil {
-				panic(err)
+	aggregateWg.Wait()
+
+	// agregation is done, print everything
+
+	output := bufio.NewWriterSize(os.Stdout, bufferSizeInBytes)
+	for _, res := range aggregatedRes {
+		for _, v := range res {
+			if len(v.name) > 0 {
+				printMeasurement(v, output)
 			}
 		}
-
-		for bufLastReadIdx := 0; bufLastReadIdx < lastNewLineIdx; {
-			lineStart, lineEnd := lineIdxs(bufLastReadIdx, buf, newLine)
-			bufLastReadIdx = lineEnd + 1
-
-			stHash, stTemp, stName := parseStationLine(buf[lineStart:lineEnd])
-			current := result[stHash]
-			current.name = stName
-			current.max = maxMeasurements(current.max, stTemp)
-			current.min = minMeasurements(current.min, stTemp)
-			current.avg = avgMeasurements(current.avg, stTemp)
-			result[stHash] = current
-		}
 	}
-
-	output := bufio.NewWriterSize(os.Stdout, bufferSize)
-	for _, v := range result {
-		if len(v.name) > 0 {
-			printMeasurement(v, output)
-		}
-	}
-	err = output.Flush()
+	err := output.Flush()
 	if err != nil {
 		panic(err)
 	}

@@ -47,11 +47,11 @@ func parseMeasurement(linePart []byte) int16 {
 	return measurement
 }
 
-// avgMeasurements sums the two measurements and returns the measurement value
-func avgMeasurements(a, b int16) int16 {
-	// return (a + b) / 2
-	return (a + b) >> 1
-}
+// // avgMeasurements sums the two measurements and returns the measurement value
+// func avgMeasurements(a, b int16) int16 {
+// 	// return (a + b) / 2
+// 	return (a + b) >> 1
+// }
 
 // minMeasurements returns the lowest measurement value
 func minMeasurements(a, b int16) int16 {

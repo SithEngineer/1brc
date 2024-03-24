@@ -176,57 +176,6 @@ func Benchmark_parseMeasurement(b *testing.B) {
 	}
 }
 
-func Test_avgMeasurements(t *testing.T) {
-	tests := []struct {
-		name         string
-		measurements []int16
-		wantResult   int16
-	}{
-		{
-			name:         "All zeros",
-			measurements: []int16{0, 0, 0, 0},
-			wantResult:   0,
-		},
-		{
-			name:         "Values 1 and 2",
-			measurements: []int16{1, 2},
-			wantResult:   1,
-		},
-		{
-			name:         "Values -101 and 101",
-			measurements: []int16{-101, 101},
-			wantResult:   0,
-		},
-		{
-			name:         "3 actual measurements",
-			measurements: []int16{357, -618, 286},
-			wantResult:   77, // actual average value is 8,3(3) if we sum these 3 values and divide by 3
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			avgRes := tt.measurements[0]
-			for i := 1; i < len(tt.measurements); i++ {
-				avgRes = avgMeasurements(avgRes, tt.measurements[i])
-			}
-			if avgRes != tt.wantResult {
-				t.Errorf("avgMeasurements() = %v, want %v", avgRes, tt.wantResult)
-			}
-		})
-	}
-}
-
-// (a+b)/2 = 0,8010 ns/op
-// (a+b)>>1 = 0.7973 ns/op
-func Benchmark_avgMeasurements(b *testing.B) {
-	var v1 int16 = 357
-	var v2 int16 = -618
-	for i := 0; i < b.N; i++ {
-		avgMeasurements(v1, v2)
-	}
-}
-
 func Test_minMeasurements(t *testing.T) {
 	tests := []struct {
 		name     string

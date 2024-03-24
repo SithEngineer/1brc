@@ -99,3 +99,5 @@ After knowing the beginning and end of a line, this function is used to parse th
 #### `mapaccess1_fast64` and `mapassign_fast64`
 
 ~31% and ~7% respectively CPU cycles consumed. This can be mitigated by not using a map... Or not using go map.
+
+#### CPU cap at 300% and not coherent deadlocks...

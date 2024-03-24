@@ -5,14 +5,15 @@ import (
 	"testing"
 )
 
-// using ints -> 203,8 ns/op
+// using ints -> 206,1 ns/op
 // using float32 -> 309.5 ns/op
 func Benchmark_printMeasurement(b *testing.B) {
 	m := measurement{
-		name: []byte{'B', 'u', 'e', 'n', 'o', 's', ' ', 'A', 'i', 'r', 'e', 's'},
-		min:  225,
-		max:  335,
-		avg:  285,
+		name:        []byte{'B', 'u', 'e', 'n', 'o', 's', ' ', 'A', 'i', 'r', 'e', 's'},
+		min:         225,
+		max:         335,
+		sum:         560,
+		nrSightings: 2,
 	}
 	var buf bytes.Buffer
 	for i := 0; i < b.N; i++ {
@@ -29,22 +30,24 @@ func Test_printMeasurement(t *testing.T) {
 		{
 			name: "simple test",
 			given: measurement{
-				name: []byte{'B', 'u', 'e', 'n', 'o', 's', ' ', 'A', 'i', 'r', 'e', 's'},
-				min:  225,
-				max:  335,
-				avg:  285,
+				name:        []byte{'B', 'u', 'e', 'n', 'o', 's', ' ', 'A', 'i', 'r', 'e', 's'},
+				min:         225,
+				max:         335,
+				sum:         560,
+				nrSightings: 2,
 			},
-			expected: "Buenos Aires;22.5;28.5;33.5\n",
+			expected: "Buenos Aires;22.5;28.0;33.5\n",
 		},
 		{
 			name: "negative values",
 			given: measurement{
-				name: []byte{'B', 'u', 'e', 'n', 'o', 's', ' ', 'A', 'i', 'r', 'e', 's'},
-				min:  -335,
-				max:  -225,
-				avg:  -285,
+				name:        []byte{'B', 'u', 'e', 'n', 'o', 's', ' ', 'A', 'i', 'r', 'e', 's'},
+				min:         -335,
+				max:         -225,
+				sum:         -560,
+				nrSightings: 2,
 			},
-			expected: "Buenos Aires;-33.5;-28.5;-22.5\n",
+			expected: "Buenos Aires;-33.5;-28.0;-22.5\n",
 		},
 	}
 
